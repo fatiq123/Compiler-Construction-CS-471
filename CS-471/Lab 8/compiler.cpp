@@ -3,6 +3,7 @@
 #include <string>
 #include <cctype>
 #include <map>
+#include <fstream>
 
 using namespace std;
 
@@ -24,6 +25,7 @@ class Lexer {
     private:
         string src;
         size_t pos;
+        int line;
         /*
         It hold positive values. 
         In C++, size_t is an unsigned integer data type used to represent the 
@@ -43,6 +45,7 @@ class Lexer {
                 char current = src[pos];
                 
                 if (isspace(current)) {
+                    if (current == '\n') line++;                    
                     pos++;
                     continue;
                 }
@@ -213,19 +216,20 @@ private:
     }
 };
 
-int main() {
-    string input = R"(
-        int a;
-        a = 5;
-        int b;
-        b = a + 10;
-        if (b > 10) {
-            return b;
-        } else {
-            return 0;
-        }
-    )";
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        cout << "Usage: ./compiler <filename>" << endl;
+        return 1;
+    }
+    
+    ifstream file(argv[1]);
+    if (!file) {
+        cout << "Error opening file: " << argv[1] << endl;
+        return 1;
+    }
 
+    string input((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+    
     Lexer lexer(input);
     vector<Token> tokens = lexer.tokenize();
     

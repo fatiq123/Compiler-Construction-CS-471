@@ -216,7 +216,7 @@ private:
 int main() {
     string input = R"(
         int a;
-        a = 5;
+        a  5;
         int b;
         b = a + 10;
         if (b > 10) {
