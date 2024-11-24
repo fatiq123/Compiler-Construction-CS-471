@@ -29,6 +29,10 @@ enum TokenType
     T_SEMICOLON,
     T_GT,
     T_LT,
+    T_EQ,
+    T_NEQ,
+    T_GTE,
+    T_LTE,
     T_EOF,
 };
 
@@ -36,14 +40,12 @@ struct Token
 {
     TokenType type;
     string value;
-    int line; // Add line number to the token
+    int line;
 };
 
 struct Symbol
 {
-    string type; // Variable type (e.g., int)
-    int line;    // Line number where it was declared
-    int scope;   // Scope level
+    int value;
 };
 
 class Lexer
@@ -51,7 +53,7 @@ class Lexer
 private:
     string src;
     size_t pos;
-    int line; // Current line number
+    int line;
 
 public:
     Lexer(const string &src) : src(src), pos(0), line(1) {}
@@ -66,7 +68,7 @@ public:
             if (isspace(current))
             {
                 if (current == '\n')
-                    line++; // Increment line on newline
+                    line++;
                 pos++;
                 continue;
             }
@@ -120,7 +122,38 @@ public:
             switch (current)
             {
             case '=':
-                tokens.push_back(Token{T_ASSIGN, "=", line});
+                if (pos + 1 < src.size() && src[pos + 1] == '=')
+                {
+                    tokens.push_back(Token{T_EQ, "==", line});
+                    pos++;
+                }
+                else
+                    tokens.push_back(Token{T_ASSIGN, "=", line});
+                break;
+            case '!':
+                if (pos + 1 < src.size() && src[pos + 1] == '=')
+                {
+                    tokens.push_back(Token{T_NEQ, "!=", line});
+                    pos++;
+                }
+                break;
+            case '<':
+                if (pos + 1 < src.size() && src[pos + 1] == '=')
+                {
+                    tokens.push_back(Token{T_LTE, "<=", line});
+                    pos++;
+                }
+                else
+                    tokens.push_back(Token{T_LT, "<", line});
+                break;
+            case '>':
+                if (pos + 1 < src.size() && src[pos + 1] == '=')
+                {
+                    tokens.push_back(Token{T_GTE, ">=", line});
+                    pos++;
+                }
+                else
+                    tokens.push_back(Token{T_GT, ">", line});
                 break;
             case '+':
                 tokens.push_back(Token{T_PLUS, "+", line});
@@ -149,19 +182,13 @@ public:
             case ';':
                 tokens.push_back(Token{T_SEMICOLON, ";", line});
                 break;
-            case '>':
-                tokens.push_back(Token{T_GT, ">", line});
-                break;
-            case '<':
-                tokens.push_back(Token{T_LT, "<", line});
-                break;
             default:
                 cout << "Unexpected character: " << current << endl;
                 exit(1);
             }
             pos++;
         }
-        tokens.push_back(Token{T_EOF, "", line}); // Add EOF token at the end
+        tokens.push_back(Token{T_EOF, "", line});
         return tokens;
     }
 
@@ -176,12 +203,12 @@ private:
 
     void skipMultiLineComment()
     {
-        pos += 2; // Skip initial /*
+        pos += 2;
         while (pos < src.size())
         {
             if (src[pos] == '*' && pos + 1 < src.size() && src[pos + 1] == '/')
             {
-                pos += 2; // Skip closing */
+                pos += 2;
                 break;
             }
             pos++;
@@ -193,71 +220,56 @@ class SymbolTable
 {
 private:
     map<string, Symbol> symbols;
-    int currentScope = 0;
 
-public:                         
-    void enterScope() { 
-        currentScope++;
+public:
+    void addSymbol(const string &name, int value)
+    {
+        symbols[name] = {value};
     }
 
-    void exitScope()
+    bool getSymbolValue(const string &name, int &value)
     {
-        // Remove all symbols with the current scope level
-        for (auto it = symbols.begin(); it != symbols.end();)
+        if (symbols.find(name) != symbols.end())
         {
-            if (it->second.scope == currentScope)
-                it = symbols.erase(it);
-            else
-                ++it;
-        }
-        currentScope--;
-    }
-
-    bool addSymbol(const string &name, const string &type, int line)
-    {
-        if (symbols.find(name) == symbols.end() || symbols[name].scope != currentScope)
-        {
-            symbols[name] = {type, line, currentScope};
+            value = symbols[name].value;
             return true;
         }
-        return false; // Symbol already exists in the current scope
+        return false;
     }
 
-    bool symbolExists(const string &name)
+    void setSymbolValue(const string &name, int value)
     {
-        return symbols.find(name) != symbols.end() && symbols[name].scope <= currentScope;
-    }
-
-    void printSymbols()
-    {
-        cout << "\nSymbol Table:\n";
-        cout << "Identifier\tType\tScope\tLine\n";
-        for (const auto &entry : symbols)
+        if (symbols.find(name) != symbols.end())
         {
-            cout << entry.first << "\t\t" << entry.second.type << "\t" << entry.second.scope << "\t" << entry.second.line << "\n";
+            symbols[name].value = value;
+        }
+        else
+        {
+            addSymbol(name, value);
         }
     }
 };
 
-
 class Parser
 {
+private:
+    vector<Token> tokens;
+    size_t pos;
+    SymbolTable &symbolTable;
+
 public:
-    Parser(const vector<Token> &tokens) : tokens(tokens), pos(0) {}
+    Parser(const vector<Token> &tokens, SymbolTable &symbolTable) : tokens(tokens), pos(0), symbolTable(symbolTable) {}
 
     void parseProgram()
     {
         while (tokens[pos].type != T_EOF)
-        { // Continue until EOF
+        {
             parseStatement();
         }
-        cout << "Parsing completed successfully! No Syntax Error" << endl;
+        cout << "Execution completed successfully!" << endl;
     }
 
 private:
-    vector<Token> tokens;
-    size_t pos;
-
     void parseStatement()
     {
         if (tokens[pos].type == T_INT)
@@ -268,143 +280,227 @@ private:
         {
             parseAssignment();
         }
-        else if (tokens[pos].type == T_IF)
-        {
-            parseIfStatement();
-        }
-        else if (tokens[pos].type == T_RETURN)
-        {
-            parseReturnStatement();
-        }
         else if (tokens[pos].type == T_WHILE)
         {
-            parseWhileStatement();
+            parseWhileLoop();
         }
         else if (tokens[pos].type == T_FOR)
         {
-            parseForStatement();
-        }
-        else if (tokens[pos].type == T_LBRACE)
-        {
-            parseBlock();
+            parseForLoop();
         }
         else
         {
-            cout << "Syntax error: unexpected token '" << tokens[pos].value
-                 << "' on line " << tokens[pos].line << endl;
+            cout << "Syntax error at: " << tokens[pos].value << endl;
             exit(1);
         }
-    }
-
-void parseFunctionDeclaration()
-{
-    expect(T_INT);         // Expect 'int' keyword
-    expect(T_ID);          // Expect function name (e.g., main)
-    expect(T_LPAREN);      // Expect '('
-    expect(T_RPAREN);      // Expect ')'
-    parseBlock();          // Parse function body
-}
-
-    void parseBlock()
-    {
-        expect(T_LBRACE);
-        while (tokens[pos].type != T_RBRACE && tokens[pos].type != T_EOF)
-        {
-            parseStatement();
-        }
-        expect(T_RBRACE);
     }
 
     void parseDeclaration()
     {
         expect(T_INT);
+        string name = tokens[pos].value;
         expect(T_ID);
+        expect(T_ASSIGN);
+        int value = parseExpression();
         expect(T_SEMICOLON);
+        symbolTable.addSymbol(name, value);
     }
 
     void parseAssignment()
     {
-        expect(T_ID);
-        expect(T_ASSIGN);
-        parseExpression();
-        expect(T_SEMICOLON);
+        string name = tokens[pos].value;         // Get the variable name
+        expect(T_ID);                            // Expect an identifier
+        expect(T_ASSIGN);                        // Expect '='
+        int value = parseExpression();           // Parse and evaluate the expression
+        expect(T_SEMICOLON);                     // Expect ';'
+        symbolTable.setSymbolValue(name, value); // Update the symbol table
     }
 
-    void parseIfStatement()
+    void parseWhileLoop()
     {
-        expect(T_IF);
-        expect(T_LPAREN);
-        parseExpression();
-        expect(T_RPAREN);
-        parseStatement();
-        if (tokens[pos].type == T_ELSE)
+        expect(T_WHILE);  // Expect 'while'
+        expect(T_LPAREN); // Expect '('
+
+        size_t conditionStart = pos;                  // Save the position of the condition
+        bool condition = parseRelationalExpression(); // Parse and evaluate the condition
+        expect(T_RPAREN);                             // Expect ')'
+
+        size_t loopBodyStart = pos; // Save the position of the loop body
+
+        while (condition) // Execute the loop while the condition is true
         {
-            expect(T_ELSE);
-            parseStatement();
+            pos = loopBodyStart;                     // Reset to the start of the loop body
+            parseBlock();                            // Execute the loop body
+            pos = conditionStart;                    // Reset to the start of the condition
+            condition = parseRelationalExpression(); // Re-evaluate the condition
+        }
+
+        // After loop ends, skip over the loop body
+        pos = loopBodyStart; // Reset to the loop body
+        parseBlock();        // Skip the loop body (to exit the loop)
+    }
+
+    void parseForLoop()
+    {
+        expect(T_FOR);    // Expect 'for'
+        expect(T_LPAREN); // Expect '('
+
+        parseDeclaration();                           // Parse the initialisation statement (e.g., int i = 0)
+        bool condition = parseRelationalExpression(); // Parse the condition (e.g., i < 10)
+        expect(T_SEMICOLON);                          // Expect ';'
+
+        size_t incrementStart = pos; // Remember position of the increment statement
+        parseStatement();            // Parse the increment statement (e.g., i = i + 1)
+        expect(T_RPAREN);            // Expect ')'
+
+        while (condition) // Execute the loop while the condition is true
+        {
+            parseBlock(); // Parse the loop body
+
+            // Reevaluate the increment statement and condition
+            pos = incrementStart;                    // Reset to increment statement
+            parseStatement();                        // Execute the increment
+            condition = parseRelationalExpression(); // Reevaluate the condition
         }
     }
 
-    void parseWhileStatement()
+    void parseBlock()
     {
-        expect(T_WHILE);
-        expect(T_LPAREN);
-        parseExpression(); // Condition
-        expect(T_RPAREN);
-        parseStatement(); // Body
-    }
+        expect(T_LBRACE); // Expect '{'
 
-    void parseForStatement()
-    {
-        expect(T_FOR);
-        expect(T_LPAREN);
-        // For loop initialization
-        parseAssignment(); // Example: int j = 0
-        expect(T_SEMICOLON);
-        // For loop condition
-        parseExpression(); // Example: j < 5
-        expect(T_SEMICOLON);
-        // For loop increment
-        expect(T_ID); // Example: j
-        expect(T_ASSIGN);
-        expect(T_ID); // Example: j
-        expect(T_PLUS);
-        expect(T_NUM); // Example: 1
-        expect(T_RPAREN);
-        parseStatement(); // Body
-    }
-
-    void parseReturnStatement()
-    {
-        expect(T_RETURN);
-        parseExpression();
-        expect(T_SEMICOLON);
-    }
-
-    void parseExpression()
-    { // Simplified for demonstration...
-        if (tokens[pos].type == T_NUM || tokens[pos].type == T_ID)
+        while (tokens[pos].type != T_RBRACE && tokens[pos].type != T_EOF)
         {
-            pos++; // Consume number or identifier
+            parseStatement(); // Parse and execute each statement in the block
+        }
+
+        expect(T_RBRACE); // Expect '}'
+    }
+
+    bool parseRelationalExpression()
+    {
+        int left = parseExpression(); // Parse the left operand
+
+        // Ensure the next token is a relational operator
+        if (tokens[pos].type == T_LT || tokens[pos].type == T_GT || tokens[pos].type == T_EQ ||
+            tokens[pos].type == T_NEQ || tokens[pos].type == T_LTE || tokens[pos].type == T_GTE)
+        {
+            TokenType op = tokens[pos].type;
+            pos++; // Consume the relational operator
+
+            int right = parseExpression(); // Parse the right operand
+
+            // Evaluate the relational expression
+            switch (op)
+            {
+            case T_LT:
+                return left < right;
+            case T_GT:
+                return left > right;
+            case T_EQ:
+                return left == right;
+            case T_NEQ:
+                return left != right;
+            case T_LTE:
+                return left <= right;
+            case T_GTE:
+                return left >= right;
+            default:
+                cout << "Invalid relational operator!" << endl;
+                exit(1);
+            }
         }
         else
         {
-            cout << "Syntax error: expected expression but found '" << tokens[pos].value
-                 << "' on line " << tokens[pos].line << endl;
+            cout << "Syntax error: Expected relational operator but found '"
+                 << tokens[pos].value << "' on line " << tokens[pos].line << endl;
+            exit(1);
+        }
+    }
+
+    int parseExpression()
+    {
+        // Parse the first operand
+        int left = 0;
+
+        if (tokens[pos].type == T_NUM)
+        {
+            left = stoi(tokens[pos].value); // Convert number token to an integer
+            pos++;                          // Move to the next token
+        }
+        else if (tokens[pos].type == T_ID)
+        {
+            string name = tokens[pos].value;
+            pos++;                                       // Move to the next token
+            if (!symbolTable.getSymbolValue(name, left)) // Get the variable value
+            {
+                cout << "Undefined variable: " << name << endl;
+                exit(1);
+            }
+        }
+        else
+        {
+            cout << "Unexpected token in expression: " << tokens[pos].value << endl;
             exit(1);
         }
 
+        // Parse binary operators and their operands
         while (tokens[pos].type == T_PLUS || tokens[pos].type == T_MINUS ||
                tokens[pos].type == T_MUL || tokens[pos].type == T_DIV)
         {
-            pos++; // Consume operator
-            if (tokens[pos].type != T_NUM && tokens[pos].type != T_ID)
+            TokenType op = tokens[pos].type; // Capture the operator
+            pos++;                           // Consume the operator
+
+            // Parse the right operand
+            int right = 0;
+            if (tokens[pos].type == T_NUM)
             {
-                cout << "Syntax error: expected expression after operator but found '"
+                right = stoi(tokens[pos].value);
+                pos++;
+            }
+            else if (tokens[pos].type == T_ID)
+            {
+                string name = tokens[pos].value;
+                pos++;
+                if (!symbolTable.getSymbolValue(name, right))
+                {
+                    cout << "Undefined variable: " << name << endl;
+                    exit(1);
+                }
+            }
+            else
+            {
+                cout << "Syntax error: Expected number or identifier but found '"
                      << tokens[pos].value << "' on line " << tokens[pos].line << endl;
                 exit(1);
             }
-            pos++; // Consume next number or identifier
+
+            // Perform the operation
+            switch (op)
+            {
+            case T_PLUS:
+                left += right;
+                break;
+            case T_MINUS:
+                left -= right;
+                break;
+            case T_MUL:
+                left *= right;
+                break;
+            case T_DIV:
+                if (right == 0)
+                {
+                    cout << "Error: Division by zero on line " << tokens[pos].line << endl;
+                    exit(1);
+                }
+                left /= right;
+                break;
+            default:
+                cout << "Invalid operator in expression!" << endl;
+                exit(1);
+            }
         }
+
+        return left; // Return the result of the expression
     }
 
     void expect(TokenType type)
@@ -415,8 +511,7 @@ void parseFunctionDeclaration()
         }
         else
         {
-            cout << "Syntax error: expected token type but found '" << tokens[pos].value
-                 << "' on line " << tokens[pos].line << endl;
+            cout << "Expected token type but found: " << tokens[pos].value << endl;
             exit(1);
         }
     }
@@ -425,31 +520,18 @@ void parseFunctionDeclaration()
 int main()
 {
     string input = R"(
-        int main() {
-            int i = 0;  // Loop counter
+    int x = 0;          // Declare and initialise variable
 
-            while(i < 10) {   // While loop example
-                i = i + 1;   // Increment counter
-            }
-
-            for(int j = 0; j < 5; j = j + 1) {   // For loop example
-                j = j * 2;   // Some operation inside loop
-            }
-            
-            return i;   // Return statement example
-        }
-    )";
+    while (x < 5) {     // While loop condition
+        x = x + 1;      // Increment x
+    }
+)";
 
     Lexer lexer(input);
     vector<Token> tokens = lexer.tokenize();
 
-    // Output tokens with their values and lines for verification.
-    for (const Token &token : tokens)
-    {
-        cout << "Token: '" << token.value << "' on Line: " << token.line << endl;
-    }
-
-    Parser parser(tokens);
+    SymbolTable symbolTable;
+    Parser parser(tokens, symbolTable);
     parser.parseProgram();
 
     return 0;
